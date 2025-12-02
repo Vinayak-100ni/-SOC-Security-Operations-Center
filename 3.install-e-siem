@@ -1,0 +1,248 @@
+Here’s a **clean, practical step-by-step guide to install Elastic SIEM (Elastic Security) on AWS EC2** for lab or production testing.
+
+This uses **Elastic Stack (ELK + SIEM)** on a single EC2 Ubuntu instance.
+
+---
+
+## 1. Create EC2 Instance
+
+### Recommended specs (for SIEM):
+
+| Setting        | Value                                       |
+| -------------- | ------------------------------------------- |
+| AMI            | Ubuntu 22.04                                |
+| Instance type  | t3.large (minimum)                          |
+| Storage        | 50–100 GB                                   |
+| Security Group | Allow: `22`, `5601`, `9200`, `5044`, `8220` |
+
+### Open Ports
+
+```
+22     - SSH
+5601   - Kibana
+9200   - Elasticsearch
+5044   - Logstash
+8220   - Fleet/Elastic-Agent
+```
+
+---
+
+## 2. Connect to Instance
+
+```bash
+ssh -i your-key.pem ubuntu@<EC2_PUBLIC_IP>
+```
+
+Update system:
+
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+---
+
+## 3. Install Elasticsearch
+
+```bash
+wget https://artifacts.elastic.co/GPG-KEY-elasticsearch
+sudo apt-key add GPG-KEY-elasticsearch
+
+sudo apt install apt-transport-https
+
+echo "deb https://artifacts.elastic.co/packages/8.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-8.x.list
+
+sudo apt update
+sudo apt install elasticsearch -y
+```
+
+### Configure Elasticsearch
+
+```bash
+sudo nano /etc/elasticsearch/elasticsearch.yml
+```
+
+Edit/add:
+
+```yaml
+cluster.name: elastic-siem
+node.name: node-1
+network.host: 0.0.0.0
+http.port: 9200
+discovery.type: single-node
+xpack.security.enabled: true
+```
+
+Start:
+
+```bash
+sudo systemctl start elasticsearch
+sudo systemctl enable elasticsearch
+```
+
+Check:
+
+```bash
+curl -X GET "localhost:9200"
+```
+
+---
+
+## 4. Set Elastic Password
+
+```bash
+sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic
+```
+
+Save the password.
+
+---
+
+## 5. Install Kibana (SIEM UI)
+
+```bash
+sudo apt install kibana -y
+```
+
+Configure:
+
+```bash
+sudo nano /etc/kibana/kibana.yml
+```
+
+Edit:
+
+```yaml
+server.host: "0.0.0.0"
+elasticsearch.hosts: ["http://localhost:9200"]
+elasticsearch.username: "kibana_system"
+elasticsearch.password: "<password>"
+```
+
+Start:
+
+```bash
+sudo systemctl start kibana
+sudo systemctl enable kibana
+```
+
+Access in browser:
+
+```
+http://EC2_PUBLIC_IP:5601
+```
+
+Login:
+
+* User: elastic
+* Pass: (the one you created)
+
+---
+
+## 6. Enable SIEM (Elastic Security)
+
+In Kibana:
+
+```
+☰ → Security → Enable Elastic Security
+```
+
+You now have:
+✅ SIEM
+✅ Alerts
+✅ Detection Rules
+✅ Hosts & Network monitoring
+
+---
+
+## 7. Install Elastic Agent (for logs & attacks simulation)
+
+### From Kibana:
+
+```
+Management → Fleet → Add agent
+```
+
+Copy command like:
+
+```bash
+curl -L -O https://artifacts.elastic.co/downloads/beats/elastic-agent/elastic-agent-8.x.x-linux-x86_64.tar.gz
+tar xzvf elastic-agent-8.x.x-linux-x86_64.tar.gz
+cd elastic-agent-8.x.x-linux-x86_64
+sudo ./elastic-agent install --url=https://EC2_IP:8220 --enrollment-token=XXXX
+```
+
+After install:
+
+* Go to **Security → Hosts**
+* You’ll see your EC2 system
+
+---
+
+## 8. (Optional) Install Logstash
+
+If needed:
+
+```bash
+sudo apt install logstash -y
+```
+
+Basic config:
+
+```bash
+sudo nano /etc/logstash/conf.d/syslog.conf
+```
+
+```
+input { beats { port => 5044 } }
+output { elasticsearch { hosts => ["localhost:9200"] } }
+```
+
+Start:
+
+```bash
+sudo systemctl start logstash
+```
+
+---
+
+## 9. Verify SIEM is working
+
+Go to Kibana:
+
+```
+Security → Dashboards
+Security → Hosts
+Security → Network
+Security → Alerts
+```
+
+Then try failed logins:
+
+```bash
+ssh wronguser@localhost
+```
+
+Watch in:
+
+```
+Security > Alerts
+```
+
+---
+
+## SIEM Architecture on EC2
+
+```
+Logs / Attacks
+       |
+   Elastic Agent
+       |
+Elasticsearch (9200)
+       |
+   Kibana (5601)
+       |
+   Elastic SIEM
+```
+
+---
+
